@@ -6,7 +6,7 @@ each one in a 3D viewer when you open the file.
 | Part | Size (mm) | What it is |
 |---|---|---|
 | [`body.stl`](body.stl) | 20 × 25.7 × 81 | Main body |
-| [`flap.stl`](flap.stl) | 20 × 23.1 × 7.5 | Hinged flap the horn swings through 90° |
+| [`door.stl`](door.stl) | 20 × 23.1 × 7.5 | Hinged door the horn swings through 90° |
 | [`servo-bracket.stl`](servo-bracket.stl) | 20 × 2 × 18.5 | U bracket that holds the servo |
 | [`esp32-bracket.stl`](esp32-bracket.stl) | 4.2 × 10 × 26 | Bracket that holds the XIAO ESP32C6 |
 
