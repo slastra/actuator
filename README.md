@@ -13,6 +13,7 @@ arm through 90°, driven from an Android phone.
 | | |
 |---|---|
 | [`firmware/`](firmware) | ESP-IDF 6.0 firmware: servo control with stall protection, NimBLE peripheral with PIN pairing, OTA updates over BLE with rollback, status LED, USB console |
+| [`hardware/`](hardware) | Printable parts (STL): body, flap, servo and ESP32 brackets |
 | [`android/`](android) | Kotlin + Jetpack Compose app (Material 3 Expressive): finds, pairs and drives the actuator |
 
 The BLE protocol (UUIDs, value layouts, error codes) is specified in
@@ -20,13 +21,14 @@ The BLE protocol (UUIDs, value layouts, error codes) is specified in
 
 ## Quick start
 
-1. Wire the servo: red to 5V, brown to GND, orange to D10 (GPIO18). See
+1. Print the parts in [`hardware/`](hardware) and assemble.
+2. Wire the servo: red to 5V, brown to GND, orange to D10 (GPIO18). See
    [firmware/README.md](firmware/README.md#wiring) for the pin-order catch.
-2. Pick a pairing PIN: `cp firmware/sdkconfig.defaults.local.example
+3. Pick a pairing PIN: `cp firmware/sdkconfig.defaults.local.example
    firmware/sdkconfig.defaults.local` and fill in six digits.
-3. Flash once over USB: `cd firmware && idf.py build flash`. After that,
+4. Flash once over USB: `cd firmware && idf.py build flash`. After that,
    `tools/ota-push` updates it over BLE.
-4. Build and install the app ([android/README.md](android/README.md)), open
+5. Build and install the app ([android/README.md](android/README.md)), open
    it, and enter the PIN when Android asks.
 
 ## License
