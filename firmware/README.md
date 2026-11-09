@@ -180,7 +180,7 @@ The device console (`idf.py monitor`) has the same commands, plus `pos <0-100>`,
 | `main/ble.c` | NimBLE peripheral: control and OTA services, PIN pairing, status notifications |
 | `main/led.c` | Status LED patterns |
 | `main/ota.c` | Receive into the idle slot, verify, switch; confirm-or-rollback |
-| `main/main.c` | Boot: NVS, BLE, rollback guard, sweep; the `servo>` console |
+| `main/main.c` | Boot: NVS, BLE, rollback guard, move to 90°; the `servo>` console |
 | `partitions.csv` | nvs, otadata, two 1.9 MB app slots |
 | `tools/ota-push` | Build and push an update over BLE (uv script: bleak + a BlueZ PIN agent) |
 | `tools/servo.py` | USB-serial CLI + `Servo` class |

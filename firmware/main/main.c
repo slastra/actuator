@@ -241,10 +241,8 @@ void app_main(void)
     led_start();
     ota_confirm_or_rollback(OTA_CONFIRM_TIMEOUT_MS);
 
-    servo_set_angle(SERVO_ANGLE_RANGE / 2);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    ESP_LOGI(TAG, "boot sweep");
-    servo_sweep(1);
+    ESP_LOGI(TAG, "boot: to %.0f deg", SERVO_ANGLE_RANGE);
+    servo_set_angle(SERVO_ANGLE_RANGE);
 
     start_console();
 }
