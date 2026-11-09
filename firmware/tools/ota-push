@@ -1,0 +1,275 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["bleak>=0.22", "dbus-fast>=2.0"]
+# ///
+"""Build the firmware and push it to the actuator over BLE.
+
+    tools/ota-push               # build, pair if needed, push, wait for it to confirm
+    tools/ota-push --no-build    # push build/actuator.bin as it is
+    tools/ota-push --info        # just show what the device is running
+
+Pairing is automatic: on first use this registers a BlueZ agent that answers
+the passkey prompt with CONFIG_ACTUATOR_BLE_PIN from the built sdkconfig, so
+this machine bonds like a phone would. Protocol: main/ble.h.
+"""
+
+import argparse
+import asyncio
+import os
+import re
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
+from dbus_fast import BusType
+from dbus_fast.aio import MessageBus
+from dbus_fast.service import ServiceInterface, method
+
+ROOT = Path(__file__).resolve().parent.parent
+BIN = ROOT / "build" / "actuator.bin"
+# ESP-IDF checkout: $IDF_PATH, else Espressif's default install location.
+IDF_EXPORT = Path(os.environ.get("IDF_PATH", Path.home() / "esp/esp-idf")).expanduser() / "export.sh"
+
+
+def uuid(nn: int) -> str:
+    return f"c175482b-6776-4dfd-9299-a5b850b379{nn:02x}"
+
+
+SVC = uuid(0x00)
+OTA_CTRL, OTA_DATA, OTA_INFO = uuid(0x11), uuid(0x12), uuid(0x13)
+STATES = {0: "idle", 1: "receiving", 2: "done", 3: "error"}
+ERRORS = {0: "ok", 1: "wrong state", 2: "size", 3: "chunk out of sequence",
+          4: "not an actuator image", 5: "flash write", 6: "image failed verification",
+          7: "incomplete"}
+SYNC_EVERY = 16  # every Nth chunk is written with a response, as back-pressure
+
+
+def config_value(name: str) -> str:
+    m = re.search(rf"^CONFIG_{name}=(.*)$", (ROOT / "sdkconfig").read_text(), re.M)
+    if not m:
+        sys.exit(f"CONFIG_{name} not in sdkconfig; build first")
+    return m.group(1).strip('"')
+
+
+# ---- pairing --------------------------------------------------------------
+
+class PinAgent(ServiceInterface):
+    """Answers BlueZ's passkey prompt with the device's fixed PIN."""
+
+    def __init__(self, pin: int):
+        super().__init__("org.bluez.Agent1")
+        self.pin = pin
+
+    @method()
+    def Release(self): ...
+
+    @method()
+    def RequestPasskey(self, device: "o") -> "u":  # noqa: F821
+        return self.pin
+
+    @method()
+    def RequestPinCode(self, device: "o") -> "s":  # noqa: F821
+        return f"{self.pin:06d}"
+
+    @method()
+    def DisplayPasskey(self, device: "o", passkey: "u", entered: "q"): ...  # noqa: F821
+
+    @method()
+    def DisplayPinCode(self, device: "o", pincode: "s"): ...  # noqa: F821
+
+    @method()
+    def RequestConfirmation(self, device: "o", passkey: "u"): ...  # noqa: F821
+
+    @method()
+    def RequestAuthorization(self, device: "o"): ...  # noqa: F821
+
+    @method()
+    def AuthorizeService(self, device: "o", uuid: "s"): ...  # noqa: F821
+
+    @method()
+    def Cancel(self): ...
+
+
+async def bluez(bus: MessageBus, path: str, iface: str):
+    intro = await bus.introspect("org.bluez", path)
+    return bus.get_proxy_object("org.bluez", path, intro).get_interface(iface)
+
+
+async def release_existing() -> None:
+    """Drop any connection this machine holds to an actuator.
+
+    The firmware takes one connection at a time and stops advertising while
+    connected, so a lingering BlueZ link (pairing leaves one) hides it from
+    scans here and locks phones out.
+    """
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    om = await bluez(bus, "/", "org.freedesktop.DBus.ObjectManager")
+    for path, ifaces in (await om.call_get_managed_objects()).items():
+        d = ifaces.get("org.bluez.Device1")
+        if d and d["Connected"].value and SVC in [u.lower() for u in d["UUIDs"].value]:
+            dev = await bluez(bus, path, "org.bluez.Device1")
+            await dev.call_disconnect()
+            await asyncio.sleep(1)  # let it start advertising again
+    bus.disconnect()
+
+
+async def ensure_paired(address: str, pin: int) -> None:
+    """Pair through our own bus connection, so BlueZ uses our agent."""
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    path = "/org/bluez/hci0/dev_" + address.replace(":", "_")
+    dev = await bluez(bus, path, "org.bluez.Device1")
+    if await dev.get_paired():
+        bus.disconnect()
+        return
+    print("pairing (first time on this machine)...")
+    agent_path = "/us/lastra/actuator/agent"
+    bus.export(agent_path, PinAgent(pin))
+    mgr = await bluez(bus, "/org/bluez", "org.bluez.AgentManager1")
+    await mgr.call_register_agent(agent_path, "KeyboardOnly")
+    try:
+        await dev.call_pair()
+        await dev.set_trusted(True)
+        await dev.call_disconnect()  # pairing leaves a link; bleak makes its own
+        await asyncio.sleep(1)
+        print("paired and bonded")
+    finally:
+        await mgr.call_unregister_agent(agent_path)
+        bus.disconnect()
+
+
+# ---- device ---------------------------------------------------------------
+
+async def find() -> str:
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, ad: SVC in [u.lower() for u in ad.service_uuids], timeout=15)
+    if not dev:
+        sys.exit("no actuator advertising nearby (is it powered? already connected to a phone?)")
+    return dev.address
+
+
+async def info(client: BleakClient) -> str:
+    return (await client.read_gatt_char(OTA_INFO)).decode()
+
+
+def parse_progress(b: bytes) -> tuple[str, str, int, int]:
+    state, err, received, size = struct.unpack("<BBII", b)
+    return STATES.get(state, str(state)), ERRORS.get(err, str(err)), received, size
+
+
+async def push(address: str, image: bytes) -> str:
+    async with BleakClient(address, timeout=20) as client:
+        before = await info(client)
+        print(f"device: {before}")
+
+        # BlueZ only reports the negotiated MTU once asked for it; without this
+        # bleak assumes 23 and the chunks are 16 bytes.
+        acquire = getattr(client._backend, "_acquire_mtu", None)
+        if acquire:
+            try:
+                await acquire()
+            except Exception:  # older bleak/BlueZ: fall back to what bleak knows
+                pass
+        chunk = max(20, client.mtu_size - 3) - 4
+
+        try:
+            await client.write_gatt_char(OTA_CTRL, struct.pack("<BI", 1, len(image)), response=True)
+        except BleakError as e:
+            sys.exit(f"device refused the update: {e}")
+
+        t0 = time.monotonic()
+        n = 0
+        for off in range(0, len(image), chunk):
+            payload = struct.pack("<I", off) + image[off:off + chunk]
+            n += 1
+            await client.write_gatt_char(OTA_DATA, payload, response=(n % SYNC_EVERY == 0))
+            if n % (SYNC_EVERY * 8) == 0 or off + chunk >= len(image):
+                done = min(off + chunk, len(image))
+                rate = done / 1024 / (time.monotonic() - t0)
+                print(f"\r  {done * 100 // len(image):3d}%  {done}/{len(image)} bytes  {rate:.0f} KB/s",
+                      end="", flush=True)
+        print()
+
+        state, err, received, size = parse_progress(await client.read_gatt_char(OTA_CTRL))
+        if state != "receiving" or received != len(image):
+            sys.exit(f"transfer failed: state {state}, error {err}, {received}/{size} bytes")
+        print(f"sent {len(image)} bytes in {time.monotonic() - t0:.1f} s ({chunk}-byte chunks); verifying...")
+        try:
+            await client.write_gatt_char(OTA_CTRL, bytes([2]), response=True)
+        except BleakError as e:
+            sys.exit(f"device rejected the image: {e}")
+        print("verified; device is rebooting into it")
+        return before
+
+
+def slot_of(line: str) -> str:
+    m = re.search(r"running (\S+)", line)
+    return m.group(1) if m else "?"
+
+
+async def wait_confirmed(address: str, old_slot: str) -> None:
+    deadline = time.monotonic() + 60
+    last = ""
+    while time.monotonic() < deadline:
+        await asyncio.sleep(3)
+        try:
+            async with BleakClient(address, timeout=10) as client:
+                last = await info(client)
+        except (BleakError, asyncio.TimeoutError):
+            continue
+        if slot_of(last) != old_slot and "(valid)" in last:
+            print(f"updated and confirmed: {last}")
+            return
+    sys.exit(f"no confirmed new image after 60 s. Last seen: {last or 'nothing'}\n"
+             "(an image whose BLE doesn't come up rolls back on its own within 30 s)")
+
+
+def build() -> None:
+    print("building...")
+    if not IDF_EXPORT.exists():
+        sys.exit(f"no ESP-IDF at {IDF_EXPORT.parent}: set IDF_PATH to your v6.0 checkout")
+    # Drop uv's virtualenv: export.sh picks its Python env by `python3 --version`,
+    # and uv's interpreter isn't the one ESP-IDF was installed against.
+    env = dict(os.environ)
+    venv = env.pop("VIRTUAL_ENV", None)
+    if venv:
+        env["PATH"] = os.pathsep.join(p for p in env["PATH"].split(os.pathsep)
+                                      if not p.startswith(venv))
+    r = subprocess.run(["bash", "-c", f". {IDF_EXPORT} >/dev/null 2>&1 && idf.py build"],
+                       cwd=ROOT, env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("\n".join((r.stdout + r.stderr).splitlines()[-30:]))
+        sys.exit("build failed")
+
+
+async def main() -> None:
+    ap = argparse.ArgumentParser(description="Push firmware to the actuator over BLE.")
+    ap.add_argument("--no-build", action="store_true", help="push build/actuator.bin as it is")
+    ap.add_argument("--info", action="store_true", help="show what the device is running and exit")
+    args = ap.parse_args()
+
+    if not args.no_build and not args.info:
+        build()
+    pin = int(config_value("ACTUATOR_BLE_PIN"))
+
+    await release_existing()
+    address = await find()
+    print(f"found actuator at {address}")
+    await ensure_paired(address, pin)
+
+    if args.info:
+        async with BleakClient(address, timeout=20) as client:
+            print(await info(client))
+        return
+
+    image = BIN.read_bytes()
+    before = await push(address, image)
+    await wait_confirmed(address, slot_of(before))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

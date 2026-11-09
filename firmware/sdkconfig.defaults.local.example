@@ -1,0 +1,9 @@
+# Copy to sdkconfig.defaults.local and fill in. That file is gitignored, and
+# the top-level CMakeLists.txt picks it up automatically when present.
+#
+# Defaults only seed a NEW sdkconfig: after changing this, `rm sdkconfig`
+# and rebuild (or edit with `idf.py menuconfig` -> Actuator).
+
+# 6-digit PIN a phone (or this machine) enters once when pairing over BLE.
+# Generate one with: shuf -i 100000-999999 -n 1
+CONFIG_ACTUATOR_BLE_PIN=

@@ -1,0 +1,12 @@
+menu "Actuator"
+
+config ACTUATOR_BLE_NAME
+    string "BLE device name"
+    default "Actuator"
+
+config ACTUATOR_BLE_PIN
+    int "BLE pairing PIN (6 digits, entered on the phone once)"
+    range 0 999999
+    default 0
+
+endmenu

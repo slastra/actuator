@@ -1,0 +1,36 @@
+# Defaults for the actuator. `idf.py build` folds these into sdkconfig the
+# first time; record anything permanent here, not just in menuconfig.
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# XIAO ESP32C6 has 4 MB of flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Console over the Type-C port. The C6 defaults to UART0, which on the XIAO
+# comes out on D6/D7, not USB. The board enumerates as /dev/ttyACM0.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# -Os instead of the -Og debug default: a smaller image is a faster OTA, and
+# nothing here is speed-critical.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# --- OTA ---------------------------------------------------------------------
+# A/B slots (partitions.csv), updated over BLE. Rollback: a freshly updated
+# image boots as PENDING_VERIFY and must confirm itself (BLE advertising) or
+# the next reboot returns to the previous image. See main/ota.c.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- BLE (primary control) ---------------------------------------------------
+# NimBLE peripheral; the only radio in use (no WiFi). Bonds persist in NVS so
+# a paired phone reconnects without the PIN. See main/ble.c.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_SM_SC=y
+# Big ATT MTU so OTA chunks are ~500 bytes; peers negotiate down if needed.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=512
