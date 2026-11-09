@@ -5,15 +5,11 @@ servo (9 mm stroke, worm drive) on a Seeed XIAO ESP32C6, swinging a 6 mm horn
 arm through 90°, driven from an Android phone.
 
 <p align="center">
-  <img src="hardware/renders/assembly.png" width="250" alt="The assembled actuator">
-  <img src="hardware/renders/exploded.png" width="250" alt="Exploded view of the printed parts">
+  <img src="docs/overview.webp" alt="Left to right: the built actuator with an 18650 cell strapped alongside and the servo pushrod on the side; a render of the printed parts; the Android app showing the horn at 62.5 degrees">
 </p>
 
-<p align="center">
-  <img src="docs/app-dark.png" width="250" alt="Controls in dark mode: horn gauge at 62.5 degrees, slider, presets, sweep and off, status card">
-  <img src="docs/app-light.png" width="250" alt="Controls in light mode at 30 degrees">
-  <img src="docs/app-searching.png" width="250" alt="Searching for the actuator">
-</p>
+More renders are in [`hardware/`](hardware), and more app screenshots in
+[`android/`](android).
 
 | | |
 |---|---|
