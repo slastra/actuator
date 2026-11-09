@@ -8,6 +8,14 @@ button groups, loading indicator, expressive motion), Material You colours from
 the wallpaper. minSdk 33, compileSdk/target 37. Built for and tested on a Pixel
 8a (Android 17).
 
+<p align="center">
+  <img src="../docs/app-dark.png" width="250" alt="Controls in dark mode: horn gauge at 62.5 degrees, slider, presets, sweep and off, status card">
+  <img src="../docs/app-light.png" width="250" alt="Controls in light mode at 30 degrees">
+  <img src="../docs/app-searching.png" width="250" alt="Searching for the actuator">
+</p>
+
+Colours come from the phone's wallpaper (Material You), so yours will differ.
+
 | File | |
 |---|---|
 | `ActuatorLink.kt` | BLE: scan, pair, connect, GATT op queue, status decoding |
