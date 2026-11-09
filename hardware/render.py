@@ -2,6 +2,7 @@
 # The STLs are exported from one Onshape Part Studio, so they keep their
 # assembled positions: importing them unmoved gives the assembly.
 import bpy, sys, math, mathutils, pathlib
+import numpy as np
 args = sys.argv[sys.argv.index("--") + 1:]
 out = pathlib.Path(args[0]); out.mkdir(parents=True, exist_ok=True)
 hw = pathlib.Path(args[1])
@@ -64,33 +65,53 @@ def bbox(objs):
     return (mathutils.Vector([min(p[i] for p in pts) for i in range(3)]),
             mathutils.Vector([max(p[i] for p in pts) for i in range(3)]))
 
-def shoot(sc, objs, path, margin):
+def fade_edges(path, feather):
+    # The shadow catcher is a huge plane, so the soft shadow would run off the
+    # canvas. Ramp alpha to 0 over the outer `feather` of the shortest side; the
+    # margin keeps the parts themselves inside the untouched middle.
+    img = bpy.data.images.load(str(path))
+    rx, ry = img.size
+    px = np.empty(rx * ry * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(ry, rx, 4)
+    f = feather * min(rx, ry)
+    d = np.minimum.outer(np.minimum(np.arange(ry), np.arange(ry)[::-1]),
+                         np.minimum(np.arange(rx), np.arange(rx)[::-1]))
+    t = np.clip(d / f, 0, 1)
+    px[..., 3] *= t * t * (3 - 2 * t)                # smoothstep
+    img.pixels.foreach_set(px.ravel())
+    img.save()
+
+def shoot(sc, objs, path, margin=1.3, feather=0.06):
     lo, hi = bbox(objs)
     bpy.ops.mesh.primitive_plane_add(size=5000, location=(0, 0, lo.z))
     bpy.context.active_object.is_shadow_catcher = True
-    # Frame by projecting the bounding box onto the camera plane.
+    # Frame on the parts' silhouette: project every vertex onto the camera
+    # plane, so the outline (not its 3D bounding box) is centred.
     rot = (-VIEW).to_track_quat("-Z", "Y")
     inv = rot.inverted()
-    corners = [inv @ mathutils.Vector((x, y, z)) for x in (lo.x, hi.x) for y in (lo.y, hi.y) for z in (lo.z, hi.z)]
-    w = max(c.x for c in corners) - min(c.x for c in corners)
-    h = max(c.y for c in corners) - min(c.y for c in corners)
+    pts = [inv @ (o.matrix_world @ v.co) for o in objs for v in o.data.vertices]
+    x0, x1 = min(p.x for p in pts), max(p.x for p in pts)
+    y0, y1 = min(p.y for p in pts), max(p.y for p in pts)
     aspect = sc.render.resolution_x / sc.render.resolution_y
     cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
     sc.collection.objects.link(cam); sc.camera = cam
     cam.data.type = "ORTHO"
-    cam.data.ortho_scale = max(w, h * aspect) * margin
+    cam.data.sensor_fit = "HORIZONTAL"               # ortho_scale = frame width, even when portrait
+    cam.data.ortho_scale = max(x1 - x0, (y1 - y0) * aspect) * margin
     cam.data.clip_start, cam.data.clip_end = 0.1, 1e5
-    cam.location = (lo + hi) / 2 + VIEW * 1000
+    cam.location = rot @ mathutils.Vector(((x0 + x1) / 2, (y0 + y1) / 2, 0)) + VIEW * 1000
     cam.rotation_euler = rot.to_euler()
     sc.render.filepath = str(path)
     bpy.ops.render.render(write_still=True)
+    fade_edges(path, feather)
 
 for name in PARTS:                                   # each part alone
     sc = scene_setup(800, 800)
-    shoot(sc, [load(name)], out / f"{name}.png", 1.25)
+    shoot(sc, [load(name)], out / f"{name}.png")
 
 sc = scene_setup(900, 1200)                          # assembled
-shoot(sc, [load(n) for n in PARTS], out / "assembly.png", 1.22)
+shoot(sc, [load(n) for n in PARTS], out / "assembly.png")
 
 sc = scene_setup(900, 1200)                          # exploded
-shoot(sc, [load(n, PARTS[n][1]) for n in PARTS], out / "exploded.png", 1.15)
+shoot(sc, [load(n, PARTS[n][1]) for n in PARTS], out / "exploded.png")
