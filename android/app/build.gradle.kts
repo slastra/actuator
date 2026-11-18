@@ -34,6 +34,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":shared"))
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     // Ahead of the BOM (which pins 1.4.0): 1.5 is where Material 3 Expressive
     // (button groups, loading indicator, expressive motion) is public.

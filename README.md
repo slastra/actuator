@@ -15,7 +15,7 @@ More renders are in [`hardware/`](hardware), and more app screenshots in
 |---|---|
 | [`firmware/`](firmware) | ESP-IDF 6.0 firmware: servo control with stall protection, NimBLE peripheral with PIN pairing, OTA updates over BLE with rollback, status LED, USB console |
 | [`hardware/`](hardware) | Printable parts (STL): body, door, servo and ESP32 brackets |
-| [`android/`](android) | Kotlin + Jetpack Compose app (Material 3 Expressive): finds, pairs and drives the actuator |
+| [`android/`](android) | Kotlin + Jetpack Compose apps for the phone (Material 3 Expressive) and for Wear OS (crown sets the angle): find, pair and drive the actuator |
 
 The BLE protocol (UUIDs, value layouts, error codes) is specified in
 [`firmware/main/ble.h`](firmware/main/ble.h).

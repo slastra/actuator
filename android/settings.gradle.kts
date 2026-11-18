@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "actuator"
-include(":app")
+include(":app", ":wear", ":shared")
